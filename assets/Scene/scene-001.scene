@@ -4537,7 +4537,7 @@
     },
     "_fillStart": 0,
     "_fillRange": 0,
-    "_isTrimmedMode": true,
+    "_isTrimmedMode": false,
     "_useGrayscale": false,
     "_atlas": null,
     "_id": "c14SrHJJlIeJXL0GEjmZZW"
@@ -4913,7 +4913,7 @@
     },
     "_fillStart": 0,
     "_fillRange": 0,
-    "_isTrimmedMode": true,
+    "_isTrimmedMode": false,
     "_useGrayscale": false,
     "_atlas": null,
     "_id": "9e8wtBQkdO04BY0McpQ7nx"
@@ -4946,7 +4946,7 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 260.25,
+      "x": 1.4499999999999886,
       "y": -102.50000000000003,
       "z": 0
     },
@@ -5289,7 +5289,7 @@
     },
     "_fillStart": 0,
     "_fillRange": 0,
-    "_isTrimmedMode": true,
+    "_isTrimmedMode": false,
     "_useGrayscale": false,
     "_atlas": null,
     "_id": "9eHuCcYWFEi6fZtPK06JzF"

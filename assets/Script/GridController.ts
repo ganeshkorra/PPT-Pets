@@ -135,6 +135,7 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
 
     private originalGridScale: Vec3 = v3(1, 1, 1);
     private originalHintScale: Vec3 = v3(0.565, 0.565, 0.565);
+    private hintDesignSize: { width: number, height: number } = { width: 0, height: 0 };
     private originalMenuItemScale: Vec3 = v3(1, 1, 1);
     private originalSelectionMenuScale: Vec3 = v3(1, 1, 1);
     private designScale: Vec3 = v3(1, 1, 1);
@@ -190,6 +191,10 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
         }
         if (this.associatedHint) {
             this.originalHintScale = this.associatedHint.scale.clone();
+            const hintTrans = this.associatedHint.getComponent(UITransform);
+            if (hintTrans) {
+                this.hintDesignSize = { width: hintTrans.contentSize.width, height: hintTrans.contentSize.height };
+            }
         }
         if (this.selectionMenu) {
             this.menuDesignScale = this.selectionMenu.scale.clone();
@@ -901,6 +906,34 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         }
     }
 
+    private getHintRevealScale(targetNode?: Node): Vec3 {
+        if (targetNode?.isValid) {
+            const targetScale = targetNode.scale.clone();
+            if (targetScale.x > 0.01 && targetScale.y > 0.01) {
+                return targetScale;
+            }
+        }
+
+        if (this.hintContainer?.isValid) {
+            const existingHint = this.hintContainer.children.find(child =>
+                child.isValid &&
+                child.active &&
+                child !== targetNode &&
+                child.scale.x > 0.01 &&
+                child.scale.y > 0.01
+            );
+            if (existingHint) {
+                return existingHint.scale.clone();
+            }
+        }
+
+        if (this.associatedHint?.isValid && this.associatedHint.active && this.associatedHint.scale.x > 0.01) {
+            return this.associatedHint.scale.clone();
+        }
+
+        return this.originalHintScale.clone();
+    }
+
 private revealNewClues() {
     if (!this.hiddenCluesToUnlock || this.hiddenCluesToUnlock.length === 0) return;
     this.showPlusOneBubble(this.hiddenCluesToUnlock.length);
@@ -916,6 +949,7 @@ private revealNewClues() {
     this.scheduleOnce(() => {
         this.hiddenCluesToUnlock.forEach((realClue, index) => {
             const finalPos = realClue.worldPosition.clone();
+            const targetScale = this.getHintRevealScale(realClue);
             const flyer = instantiate(realClue);
             director.getScene()?.getChildByName("Canvas")?.addChild(flyer);
             (flyer.getComponent(UIOpacity) || flyer.addComponent(UIOpacity)).opacity = 255;
@@ -932,13 +966,13 @@ private revealNewClues() {
                     // Angle settles smoothly
                     tween().to(0.9, { angle: 0 }, { easing: 'quadOut' }),
                     // Scale bounces in naturally
-                    tween().to(0.8, { scale: v3(0.565, 0.565, 1) }, { easing: 'elasticOut' })
+                    tween().to(0.8, { scale: targetScale }, { easing: 'elasticOut' })
                 )
                 .call(() => {
                     flyer.destroy(); 
                     if (realClue?.isValid) {
                         realClue.getComponent(UIOpacity)!.opacity = 255;
-                        realClue.setScale(v3(0.565, 0.565, 1));
+                        realClue.setScale(targetScale);
                         
                         // Sound/Voice trigger when the last clue 'snaps' into place
                         if (index === this.hiddenCluesToUnlock.length - 1) {
