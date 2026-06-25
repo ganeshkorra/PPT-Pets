@@ -339,7 +339,7 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
         ) || this;
 
         guideOwner.showGuideLabel();
-        handTarget.showSelectedFrame();
+        // handTarget.showSelectedFrame();
 
         if (handTarget.associatedHint && handTarget.associatedHint.active) {
             handTarget.showIdleHint();
@@ -698,7 +698,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
             GridController.activeBox.closeSelectionMenu();
         }
         if (this.selectionMenu.active) return;
-        this.showSelectedFrame();
+        // this.showSelectedFrame();
         this.selectionMenu.active = true;
         GridController.activeBox = this;
         
@@ -1210,7 +1210,7 @@ private executeVoiceCall() {
     GridController.isHandShowing = true;
     
      // --- ADDED THIS: Show the dotted selection frame ---
-    this.showSelectedFrame();
+    // this.showSelectedFrame();
 
     // Always pulse the Grid Box
     this.applyPulse(this.node, true);
