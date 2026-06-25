@@ -89,6 +89,7 @@ export class GridController extends Component {
     private static globalHandNode: Node | null = null;
     private static globalHandIdle: SpriteFrame | null = null;
     private static globalHandClick: SpriteFrame | null = null;
+    private static hintOriginalScales: Map<Node, Vec3> = new Map();
 
     @property(AudioClip) bgmClip: AudioClip = null!;
     @property(AudioClip) clickBoxClip: AudioClip = null!;
@@ -196,6 +197,7 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
                 this.hintDesignSize = { width: hintTrans.contentSize.width, height: hintTrans.contentSize.height };
             }
         }
+        this.cacheHintOriginalScales();
         if (this.selectionMenu) {
             this.menuDesignScale = this.selectionMenu.scale.clone();
             this.originalSelectionMenuScale = this.selectionMenu.scale.clone();
@@ -508,7 +510,7 @@ private spawnClickRipple(worldPos: Vec3) {
     rippleNode.setWorldPosition(worldPos);
 
     // Spread the 5 rays evenly around the center (Vertical Up)
-    const startAngle = -60; // Tilted left
+    const startAngle = -80; // Tilted left
     const angleStep = 30;   // 30 degrees distance between each ray
 
     for (let i = 0; i < 5; i++) {
@@ -786,7 +788,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
             GridController.isHandShowing = true;
             hand.active = true;
             hand.setSiblingIndex(999);
-            hand.setWorldPosition(v3(targetItem.worldPosition.x + 60, targetItem.worldPosition.y - 70, 0));
+            hand.setWorldPosition(v3(targetItem.worldPosition.x + 10, targetItem.worldPosition.y - 50, 0));
             hand.setScale(v3(0, 0, 0));
             tween(hand).to(0.2, { scale: GridController.initialHandScale }, { easing: 'backOut' }).call(() => this.playHandAnimation()).start();
             Tween.stopAllByTarget(targetItem);
@@ -906,24 +908,61 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         }
     }
 
+    private resolveHintContainer(): Node | null {
+        if (this.hintContainer?.isValid) {
+            if (this.hintContainer.name === "Hints") return this.hintContainer;
+
+            const parent = this.hintContainer.parent;
+            if (parent?.isValid && parent.name === "Hints") return parent;
+        }
+
+        if (this.associatedHint?.isValid) {
+            const parent = this.associatedHint.parent;
+            if (parent?.isValid && parent.name === "Hints") return parent;
+        }
+
+        return this.hintContainer?.isValid ? this.hintContainer : null;
+    }
+
+    private cacheHintOriginalScales() {
+        const hintContainer = this.resolveHintContainer();
+        if (!hintContainer?.isValid) return;
+
+        hintContainer.children.forEach(hint => {
+            if (!GridController.hintOriginalScales.has(hint)) {
+                GridController.hintOriginalScales.set(hint, hint.scale.clone());
+            }
+        });
+    }
+
+    private getHintOriginalScale(hint: Node): Vec3 {
+        let scale = GridController.hintOriginalScales.get(hint);
+        if (!scale) {
+            scale = hint.scale.clone();
+            GridController.hintOriginalScales.set(hint, scale);
+        }
+        return scale.clone();
+    }
+
     private getHintRevealScale(targetNode?: Node): Vec3 {
         if (targetNode?.isValid) {
-            const targetScale = targetNode.scale.clone();
+            const targetScale = this.getHintOriginalScale(targetNode);
             if (targetScale.x > 0.01 && targetScale.y > 0.01) {
                 return targetScale;
             }
         }
 
-        if (this.hintContainer?.isValid) {
-            const existingHint = this.hintContainer.children.find(child =>
+        const hintContainer = this.resolveHintContainer();
+        if (hintContainer?.isValid) {
+            const existingHint = hintContainer.children.find(child =>
                 child.isValid &&
                 child.active &&
                 child !== targetNode &&
-                child.scale.x > 0.01 &&
-                child.scale.y > 0.01
+                this.getHintOriginalScale(child).x > 0.01 &&
+                this.getHintOriginalScale(child).y > 0.01
             );
             if (existingHint) {
-                return existingHint.scale.clone();
+                return this.getHintOriginalScale(existingHint);
             }
         }
 
@@ -936,18 +975,21 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
 
 private revealNewClues() {
     if (!this.hiddenCluesToUnlock || this.hiddenCluesToUnlock.length === 0) return;
-    this.showPlusOneBubble(this.hiddenCluesToUnlock.length);
+    const revealingClues = this.hiddenCluesToUnlock.filter(clue => clue?.isValid);
+    if (revealingClues.length === 0) {
+        this.hiddenCluesToUnlock = [];
+        return;
+    }
 
-    this.hiddenCluesToUnlock.forEach(clue => {
-        if (!clue) return;
+    this.showPlusOneBubble(revealingClues.length);
+
+    revealingClues.forEach(clue => {
         clue.active = true;
         (clue.getComponent(UIOpacity) || clue.addComponent(UIOpacity)).opacity = 0; 
     });
 
-    this.repositionHints();
-
-    this.scheduleOnce(() => {
-        this.hiddenCluesToUnlock.forEach((realClue, index) => {
+    this.repositionHints(new Set(revealingClues), () => {
+        revealingClues.forEach((realClue, index) => {
             const finalPos = realClue.worldPosition.clone();
             const targetScale = this.getHintRevealScale(realClue);
             const flyer = instantiate(realClue);
@@ -975,7 +1017,7 @@ private revealNewClues() {
                         realClue.setScale(targetScale);
                         
                         // Sound/Voice trigger when the last clue 'snaps' into place
-                        if (index === this.hiddenCluesToUnlock.length - 1) {
+                        if (index === revealingClues.length - 1) {
                             this.playNextAvailableVoice();
                         }
                     }
@@ -983,7 +1025,7 @@ private revealNewClues() {
                 .start();
         });
         this.hiddenCluesToUnlock = [];
-    }, 0); 
+    }); 
 }
 
     private showPlusOneBubble(count: number = 1) {
@@ -1053,26 +1095,27 @@ private revealNewClues() {
     hintsToRemove.forEach((card, index) => {
         const pin = this.getHintChild(card, ["Pin", "pin", "PinNode"]);
         if (pin) {
-            let pinOp = pin.getComponent(UIOpacity) || pin.addComponent(UIOpacity);
-            tween(pin).parallel(tween().by(1.2, { position: v3(20, -1000, 0) }, { easing: 'sineIn' }), tween().by(1.2, { angle: -45 }), tween(pinOp).delay(0.4).to(0.4, { opacity: 0 })).start();
+            const pinOp = pin.getComponent(UIOpacity) || pin.addComponent(UIOpacity);
+            tween(pinOp).to(0.25, { opacity: 0 }).start();
         }
-       tween(card)
-        .delay(0.4 + (0.15 * index)) 
-        // 1. ANTICIPATION: Small shake/upwards movement
-        .to(0.15, { angle: -5, scale: v3(0.3, 0.3, 1) }, { easing: 'sineOut' })
-        // 2. RELEASE: Fly away with Cubic easing
-        .parallel(
-            tween().to(0.7, { position: v3(card.position.x - 900, card.position.y + 400, 0) }, { easing: 'cubicIn' }),
-            tween().to(0.7, { angle: 45, scale: v3(0, 0, 1) })
-        )
-        .call(() => {
-            card.active = false;
-            if (index === hintsToRemove.length - 1) { 
-                this.repositionHints(); 
-                this.playNextAvailableVoice(); 
-                onComplete(); 
-            }
-        }).start();
+
+        tween(card)
+            .delay(0.4 + (0.15 * index))
+            // 1. ANTICIPATION: Small shake/upwards movement
+            .to(0.15, { angle: -5, scale: v3(0.3, 0.3, 1) }, { easing: 'sineOut' })
+            // 2. RELEASE: Fly away with Cubic easing
+            .parallel(
+                tween().to(0.7, { position: v3(card.position.x - 900, card.position.y + 400, 0) }, { easing: 'cubicIn' }),
+                tween().to(0.7, { angle: 45, scale: v3(0, 0, 1) })
+            )
+            .call(() => {
+                card.active = false;
+                if (index === hintsToRemove.length - 1) {
+                    this.repositionHints();
+                    this.playNextAvailableVoice();
+                    onComplete();
+                }
+            }).start();
     });
 }
 
@@ -1258,8 +1301,8 @@ private playHandAnimation() {
                     if (handSprite?.isValid) handSprite.spriteFrame = GridController.globalHandClick!;
                     
                     // 2. TRIGGER THE YELLOW RIPPLE HERE
-                    // Offsetting it slightly to be at the fingertip (now closer to hand)
-                    const fingerTipPos = v3(hand.worldPosition.x - 40, hand.worldPosition.y + 50, 0);
+                    // Place the ripple just to the right of the hand so it feels attached to the tap
+                    const fingerTipPos = v3(hand.worldPosition.x - 20, hand.worldPosition.y + 45, 0);
                     this.spawnClickRipple(fingerTipPos);
                 })
                 .to(0.12, { scale: clickScale }, { easing: 'quadOut' }) // Smooth press
@@ -1273,13 +1316,22 @@ private playHandAnimation() {
         .start();
 }
 
-private repositionHints() {
-    if (!this.hintContainer) return;
-    const layout = this.hintContainer.getComponent(Layout);
+private repositionHints(skipOpacityFade: Set<Node> = new Set(), onComplete?: Function) {
+    const hintContainer = this.resolveHintContainer();
+    if (!hintContainer) {
+        if (onComplete) onComplete();
+        return;
+    }
+    this.cacheHintOriginalScales();
+    const layout = hintContainer.getComponent(Layout);
     if (layout) layout.enabled = false;
 
     // We only care about active hints that are NOT currently in a "destroying" state
-    const activeHints = this.hintContainer.children.filter(c => c.active && c.scale.x > 0.1);
+    const activeHints = hintContainer.children.filter(c => c.active && c.scale.x > 0.1);
+    if (activeHints.length === 0) {
+        if (onComplete) onComplete();
+        return;
+    }
     
     const MAX_WIDTH = 780; 
     const gapX = 25; // Slightly increased for breathing room
@@ -1290,7 +1342,8 @@ private repositionHints() {
     // --- GRID CALCULATION ---
     activeHints.forEach((h) => {
         const hTrans = h.getComponent(UITransform);
-        const w = hTrans ? hTrans.contentSize.width * h.scale.x : 200; // Accurate width after scale
+        const targetScale = this.getHintOriginalScale(h);
+        const w = hTrans ? hTrans.contentSize.width * targetScale.x : 200; // Accurate width after scale
         
         if (rowWidths[rows.length - 1] + w + gapX > MAX_WIDTH && rows[rows.length - 1].length > 0) {
             rows.push([h]); 
@@ -1304,6 +1357,12 @@ private repositionHints() {
 
     // --- ANIMATION EXECUTION ---
     let currentY = 150;
+    let pendingMoves = activeHints.length;
+    const finishMove = () => {
+        pendingMoves--;
+        if (pendingMoves <= 0 && onComplete) onComplete();
+    };
+
     rows.forEach((rowNodes, rowIndex) => {
         const totalWidth = rowWidths[rowIndex];
         const rowStartX = -(totalWidth / 2);
@@ -1312,7 +1371,8 @@ private repositionHints() {
 
         rowNodes.forEach((h, index) => {
             const hTrans = h.getComponent(UITransform);
-            const w = hTrans ? hTrans.contentSize.width * h.scale.x : 200;
+            const targetScale = this.getHintOriginalScale(h);
+            const w = hTrans ? hTrans.contentSize.width * targetScale.x : 200;
             const tx = rowStartX + xOff + (w / 2);
             const ty = currentY;
 
@@ -1325,15 +1385,16 @@ private repositionHints() {
                 .delay(index * 0.06) // Slightly longer stagger for wave effect
                 .to(0.75, { 
                     position: v3(tx, ty, 0),
-                    scale: v3(0.565, 0.565, 1) // Ensures uniform scale
+                    scale: targetScale
                 }, { 
                     easing: 'elasticOut' // Smooth elastic bounce
                 })
+                .call(finishMove)
                 .start();
 
             // Handle opacity fade-in smoothly
             const opacityComp = h.getComponent(UIOpacity) || h.addComponent(UIOpacity);
-            if (opacityComp.opacity < 255) {
+            if (opacityComp.opacity < 255 && !skipOpacityFade.has(h)) {
                 tween(opacityComp)
                     .delay(index * 0.06)
                     .to(0.5, { opacity: 255 }, { easing: 'quadOut' })
@@ -1341,7 +1402,7 @@ private repositionHints() {
             }
 
             xOff += w + gapX;
-            const actualH = hTrans ? hTrans.contentSize.height * h.scale.y : 200;
+            const actualH = hTrans ? hTrans.contentSize.height * targetScale.y : 200;
             if (actualH > rowMaxH) rowMaxH = actualH;
         });
         currentY -= (rowMaxH + gapY);
