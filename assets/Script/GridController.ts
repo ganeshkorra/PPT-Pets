@@ -1005,6 +1005,14 @@ private revealNewClues() {
         tween(bubble).to(0.3, { scale: v3(0.71, 0.71, 0.71) }, { easing: 'backOut' }).delay(1.2).to(0.3, { scale: v3(0, 0, 0) }).call(() => bubble.destroy()).start();
     }
 
+    private getHintChild(targetNode: Node, names: string[]): Node | null {
+        for (const name of names) {
+            const child = targetNode.getChildByName(name);
+            if (child) return child;
+        }
+        return null;
+    }
+
     private handleHintFeedback(onComplete: Function) {
     const hintTargets: Node[] = [];
     if (this.associatedHint) hintTargets.push(this.associatedHint);
@@ -1031,7 +1039,7 @@ private revealNewClues() {
 
     // Pop checkmarks/ticks immediately on all cards involved
     hintTargets.forEach((h) => {
-        let tick = h.getChildByName("RightNode") || h.getChildByName("Checkmark") || (h === this.associatedHint ? this.rightNode : null);
+        const tick = this.getHintChild(h, ["RightNode", "Checkmark", "Tick", "TickMark"]);
         if (tick) {
             tick.active = true;
             tick.setScale(v3(0, 0, 0));
@@ -1043,7 +1051,7 @@ private revealNewClues() {
 
     // FLY OUT ANIMATION
     hintsToRemove.forEach((card, index) => {
-        const pin = card.getChildByName("Pin") || (card === this.associatedHint ? this.pinNode : null);
+        const pin = this.getHintChild(card, ["Pin", "pin", "PinNode"]);
         if (pin) {
             let pinOp = pin.getComponent(UIOpacity) || pin.addComponent(UIOpacity);
             tween(pin).parallel(tween().by(1.2, { position: v3(20, -1000, 0) }, { easing: 'sineIn' }), tween().by(1.2, { angle: -45 }), tween(pinOp).delay(0.4).to(0.4, { opacity: 0 })).start();
@@ -1142,27 +1150,29 @@ private executeVoiceCall() {
         this.closeSelectionMenu();
         if (this.guideNode) { Tween.stopAllByTarget(this.guideNode); this.guideNode.active = false; }
 
-        this.redirectToStoreAfterGameOver(reason);
+        this.triggerGameEndCTA(reason);
     }
 
-    private redirectToStoreAfterGameOver(reason: string) {
-        const ctaButtonNode = director.getScene()?.getChildByPath("Canvas/CTA/play_now_pink-removebg-preview");
-        const ctaHandler = ctaButtonNode?.getComponent(CTAButtonHandler);
-
-        if (ctaHandler) {
-            console.log(`[GAME OVER REDIRECT] ${reason}. Redirecting to store.`);
-            ctaHandler.onStoreButtonClicked();
-        } else {
-            console.warn("[GAME OVER REDIRECT] CTAButtonHandler not found. Showing endcard fallback.");
+    private triggerGameEndCTA(reason: string) {
+        this.scheduleOnce(() => {
             const endScreen = GridController.globalCtaEndScreen || this.ctaEndScreen || director.getScene()?.getChildByPath("Canvas/CTA");
+
             if (endScreen) {
+                console.log(`[GAME OVER CTA] ${reason}. Showing CTA screen.`);
                 Analytics.instance?.dispatchEvent(analyticsEvents.ENDCARD_SHOWN);
                 endScreen.active = true;
                 endScreen.setScale(v3(0, 0, 0));
                 endScreen.setSiblingIndex(999);
                 tween(endScreen).to(0.5, { scale: v3(1, 1, 1) }, { easing: 'backOut' }).start();
+            } else {
+                console.warn("[GAME OVER CTA] CTA screen not found. Falling back to direct redirect.");
+                const ctaButtonNode = director.getScene()?.getChildByPath("Canvas/CTA/play_now_pink-removebg-preview");
+                const ctaHandler = ctaButtonNode?.getComponent(CTAButtonHandler);
+                if (ctaHandler) {
+                    ctaHandler.onStoreButtonClicked();
+                }
             }
-        }
+        }, 0.15);
     }
 
     public closeSelectionMenu() {
