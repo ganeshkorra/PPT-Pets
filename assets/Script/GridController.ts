@@ -740,11 +740,12 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         }
     });
 
-    // 3. Play the Audio Clip
+    // 3. Voice playback intentionally disabled on each grid-cell tap.
+    //    Keep the highlight bar behavior only.
     if (GridController.fxSource) {
-        GridController.fxSource.stop();
-        GridController.fxSource.clip = this.hintVoiceClip;
-        GridController.fxSource.play();
+        // GridController.fxSource.stop();
+        // GridController.fxSource.clip = this.hintVoiceClip;
+        // GridController.fxSource.play();
 
         // --- THE FIX ---
         // We cast this.hintVoiceClip to 'any' to bypass the TypeScript error.
