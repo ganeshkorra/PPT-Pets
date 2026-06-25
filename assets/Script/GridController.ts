@@ -695,7 +695,8 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         }
         if (!GridController.isTimerStarted) GridController.isTimerStarted = true;
         this.hideTutorialElements("Box Clicked");
-         this.syncHintHighlight();
+        // Do not play hint voice on every grid tap. Hint voice is handled after clue reveal/reposition.
+        // this.syncHintHighlight();
         if (GridController.activeBox && GridController.activeBox !== this) {
             GridController.activeBox.closeSelectionMenu();
         }
@@ -740,12 +741,11 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         }
     });
 
-    // 3. Voice playback intentionally disabled on each grid-cell tap.
-    //    Keep the highlight bar behavior only.
+    // 3. Play the Audio Clip
     if (GridController.fxSource) {
-        // GridController.fxSource.stop();
-        // GridController.fxSource.clip = this.hintVoiceClip;
-        // GridController.fxSource.play();
+        GridController.fxSource.stop();
+        GridController.fxSource.clip = this.hintVoiceClip;
+        GridController.fxSource.play();
 
         // --- THE FIX ---
         // We cast this.hintVoiceClip to 'any' to bypass the TypeScript error.
@@ -1068,7 +1068,9 @@ private revealNewClues() {
     if (hintTargets.length === 0) { 
         console.log(`[GRID] No hints to clear for box ${this.node.name}. Proceeding to reveal logic...`);
         onComplete(); 
-         this.playNextAvailableVoice(); // Force check here!
+        if (!this.hiddenCluesToUnlock || this.hiddenCluesToUnlock.length === 0) {
+            this.playNextAvailableVoice();
+        }
         return; 
     }
 
@@ -1113,7 +1115,9 @@ private revealNewClues() {
                 card.active = false;
                 if (index === hintsToRemove.length - 1) {
                     this.repositionHints();
-                    this.playNextAvailableVoice();
+                    if (!this.hiddenCluesToUnlock || this.hiddenCluesToUnlock.length === 0) {
+                        this.playNextAvailableVoice();
+                    }
                     onComplete();
                 }
             }).start();
@@ -1123,9 +1127,7 @@ private revealNewClues() {
   private playNextAvailableVoice() {
     if (GridController.isGameOver) return;
 
-    // --- FIX: USE DIRECT REFERENCE, NO ARROW FUNCTION () => ---
-    // This allows Cocos to find the EXACT previous timer and stop it.
-    this.unschedule(this.executeVoiceCall); 
+    GridController.allBoxes.forEach(box => box.unschedule(box.executeVoiceCall));
     this.scheduleOnce(this.executeVoiceCall, 0.5);
 }
 
