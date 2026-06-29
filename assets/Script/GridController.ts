@@ -192,8 +192,6 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
     private refreshSelectionMenuItems() {
         if (!this.selectionMenu) return;
 
-        this.applySelectionMenuAnchorForGridCell();
-
         const visibleItems: Node[] = [];
         this.selectionMenu.children.forEach(item => {
             const isCompleted = this.isMenuItemCompleted(item);
@@ -208,41 +206,6 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
         });
 
         this.fitSelectionMenuToItems(visibleItems);
-    }
-
-    private applySelectionMenuAnchorForGridCell() {
-        if (!this.selectionMenu) return;
-
-        const menuTrans = this.selectionMenu.getComponent(UITransform);
-        if (!menuTrans) return;
-
-        const rowTolerance = 35;
-        const rowBoxes = GridController.allBoxes
-            .filter(box => Math.abs(box.node.worldPosition.y - this.node.worldPosition.y) <= rowTolerance)
-            .sort((a, b) => a.node.worldPosition.x - b.node.worldPosition.x);
-
-        if (rowBoxes.length <= 1) {
-            menuTrans.setAnchorPoint(0.5, menuTrans.anchorPoint.y);
-            return;
-        }
-
-        const firstBox = rowBoxes[0];
-        const lastBox = rowBoxes[rowBoxes.length - 1];
-        let anchorX = 0.5;
-
-        if (this === firstBox) anchorX = 0;
-        else if (this === lastBox) anchorX = 0.5;
-
-        menuTrans.setAnchorPoint(anchorX, menuTrans.anchorPoint.y);
-    }
-
-    private isLastGridCellInRow(): boolean {
-        const rowTolerance = 35;
-        const rowBoxes = GridController.allBoxes
-            .filter(box => Math.abs(box.node.worldPosition.y - this.node.worldPosition.y) <= rowTolerance)
-            .sort((a, b) => a.node.worldPosition.x - b.node.worldPosition.x);
-
-        return rowBoxes.length > 1 && rowBoxes[rowBoxes.length - 1] === this;
     }
 
     private static markItemCompleted(itemName: string, itemKey: string) {
@@ -886,13 +849,8 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         const anchorX = menuTrans ? menuTrans.anchorPoint.x : 0.5;
         const anchorY = menuTrans ? menuTrans.anchorPoint.y : 0.5;
         const margin = 18;
-        const isLastCellInRow = this.isLastGridCellInRow();
         let targetX = this.node.worldPosition.x;
-        let targetY = this.node.worldPosition.y - (isLastCellInRow ? 150 : 80);
-
-        if (isLastCellInRow) {
-            targetX -= width * 0.18;
-        }
+        let targetY = this.node.worldPosition.y - 80;
 
         if (canvasTrans) {
             const canvasWorld = canvas!.worldPosition;
