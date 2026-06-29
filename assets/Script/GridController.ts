@@ -90,6 +90,8 @@ export class GridController extends Component {
     private static globalHandIdle: SpriteFrame | null = null;
     private static globalHandClick: SpriteFrame | null = null;
     private static hintOriginalScales: Map<Node, Vec3> = new Map();
+    private static completedItemNames: Set<string> = new Set();
+    private static completedMenuItemKeys: Set<string> = new Set();
 
     @property(AudioClip) bgmClip: AudioClip = null!;
     @property(AudioClip) clickBoxClip: AudioClip = null!;
@@ -139,6 +141,7 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
     private hintDesignSize: { width: number, height: number } = { width: 0, height: 0 };
     private originalMenuItemScale: Vec3 = v3(1, 1, 1);
     private originalSelectionMenuScale: Vec3 = v3(1, 1, 1);
+    private originalSelectionMenuSize: Size = new Size(0, 0);
     private designScale: Vec3 = v3(1, 1, 1);
     private designSize: { width: number, height: number } = { width: 0, height: 0 };
     private selectedFrameNode: Node | null = null;
@@ -150,6 +153,144 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
     private menuDesignScale: Vec3 = v3(1, 1, 1);
     private targetScale: Vec3 = v3(1, 1, 1);
     private targetSize: { width: number, height: number } = { width: 0, height: 0 };
+
+    private getItemSpriteFrame(item: Node): SpriteFrame | null {
+        return item.getComponent(Sprite)?.spriteFrame || null;
+    }
+
+    private getSpriteKey(spriteFrame: SpriteFrame | null): string {
+        if (!spriteFrame) return "";
+
+        const asset = spriteFrame as any;
+        return asset.uuid || asset._uuid || asset.name || "";
+    }
+
+    private getSelectionMenuGroupKey(): string {
+        if (!this.selectionMenu) return "";
+
+        return this.selectionMenu.children
+            .map(item => this.getSpriteKey(this.getItemSpriteFrame(item)))
+            .filter(key => key.length > 0)
+            .sort()
+            .join("|");
+    }
+
+    private getMenuItemCompletionKey(item: Node): string {
+        const groupKey = this.getSelectionMenuGroupKey();
+        const itemKey = this.getSpriteKey(this.getItemSpriteFrame(item)) || item.name;
+
+        if (!groupKey || !itemKey) return "";
+        return `${groupKey}::${itemKey}`;
+    }
+
+    private isMenuItemCompleted(item: Node): boolean {
+        const itemKey = this.getMenuItemCompletionKey(item);
+        if (itemKey && GridController.completedMenuItemKeys.has(itemKey)) return true;
+        return !itemKey && item.name && GridController.completedItemNames.has(item.name);
+    }
+
+    private refreshSelectionMenuItems() {
+        if (!this.selectionMenu) return;
+
+        this.applySelectionMenuAnchorForGridCell();
+
+        const visibleItems: Node[] = [];
+        this.selectionMenu.children.forEach(item => {
+            const isCompleted = this.isMenuItemCompleted(item);
+            const savedScale = this.menuItemScales.get(item.name) || item.scale.clone();
+            Tween.stopAllByTarget(item);
+            item.active = !isCompleted;
+            item.setScale(savedScale);
+
+            const button = item.getComponent(Button);
+            if (button) button.interactable = !isCompleted;
+            if (!isCompleted) visibleItems.push(item);
+        });
+
+        this.fitSelectionMenuToItems(visibleItems);
+    }
+
+    private applySelectionMenuAnchorForGridCell() {
+        if (!this.selectionMenu) return;
+
+        const menuTrans = this.selectionMenu.getComponent(UITransform);
+        if (!menuTrans) return;
+
+        const rowTolerance = 35;
+        const rowBoxes = GridController.allBoxes
+            .filter(box => Math.abs(box.node.worldPosition.y - this.node.worldPosition.y) <= rowTolerance)
+            .sort((a, b) => a.node.worldPosition.x - b.node.worldPosition.x);
+
+        if (rowBoxes.length <= 1) {
+            menuTrans.setAnchorPoint(0.5, menuTrans.anchorPoint.y);
+            return;
+        }
+
+        const firstBox = rowBoxes[0];
+        const lastBox = rowBoxes[rowBoxes.length - 1];
+        let anchorX = 0.5;
+
+        if (this === firstBox) anchorX = 0;
+        else if (this === lastBox) anchorX = 0.5;
+
+        menuTrans.setAnchorPoint(anchorX, menuTrans.anchorPoint.y);
+    }
+
+    private isLastGridCellInRow(): boolean {
+        const rowTolerance = 35;
+        const rowBoxes = GridController.allBoxes
+            .filter(box => Math.abs(box.node.worldPosition.y - this.node.worldPosition.y) <= rowTolerance)
+            .sort((a, b) => a.node.worldPosition.x - b.node.worldPosition.x);
+
+        return rowBoxes.length > 1 && rowBoxes[rowBoxes.length - 1] === this;
+    }
+
+    private static markItemCompleted(itemName: string, itemKey: string) {
+        if (!itemName && !itemKey) return;
+
+        if (itemName) GridController.completedItemNames.add(itemName);
+        if (itemKey) GridController.completedMenuItemKeys.add(itemKey);
+        GridController.allBoxes.forEach(box => box.refreshSelectionMenuItems());
+    }
+
+    private fitSelectionMenuToItems(visibleItems: Node[]) {
+        if (!this.selectionMenu || visibleItems.length === 0) return;
+
+        const menuTrans = this.selectionMenu.getComponent(UITransform);
+        if (!menuTrans) return;
+
+        const itemGap = 62;
+        const horizontalPadding = 52;
+        const verticalPadding = 44;
+        let itemsWidth = 0;
+        let maxItemHeight = 0;
+
+        visibleItems.forEach((item, index) => {
+            const itemTrans = item.getComponent(UITransform);
+            const itemScale = this.menuItemScales.get(item.name) || item.scale;
+            const itemWidth = itemTrans ? itemTrans.contentSize.width * Math.abs(itemScale.x) : 120;
+            const itemHeight = itemTrans ? itemTrans.contentSize.height * Math.abs(itemScale.y) : 120;
+            itemsWidth += itemWidth + (index > 0 ? itemGap : 0);
+            maxItemHeight = Math.max(maxItemHeight, itemHeight);
+        });
+
+        const minWidth = visibleItems.length === 1 ? 350 : visibleItems.length === 2 ? 380 : 560;
+        const width = Math.max(minWidth, itemsWidth + horizontalPadding);
+        const height = Math.max(350, maxItemHeight + verticalPadding);
+        menuTrans.setContentSize(width, height);
+
+        const anchor = menuTrans.anchorPoint;
+        const contentCenterX = width * (0.5 - anchor.x);
+        const contentCenterY = height * (0.5 - anchor.y);
+        let cursorX = -itemsWidth / 2;
+        visibleItems.forEach(item => {
+            const itemTrans = item.getComponent(UITransform);
+            const itemScale = this.menuItemScales.get(item.name) || item.scale;
+            const itemWidth = itemTrans ? itemTrans.contentSize.width * Math.abs(itemScale.x) : 120;
+            item.setPosition(v3(contentCenterX + cursorX + itemWidth / 2, contentCenterY - 33, 0));
+            cursorX += itemWidth + itemGap;
+        });
+    }
 
 
     private checkTapProgress() {
@@ -169,6 +310,8 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
     start() {
         // Fire LOADED → DISPLAYED sequence when game first loads (only once)
         if (GridController.allBoxes.length === 0) {
+            GridController.completedItemNames.clear();
+            GridController.completedMenuItemKeys.clear();
             if (Analytics.instance) {
                 // 1. Fire LOADED first to signal assets are ready
                 Analytics.instance.dispatchEvent(analyticsEvents.LOADED);
@@ -201,6 +344,8 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
         if (this.selectionMenu) {
             this.menuDesignScale = this.selectionMenu.scale.clone();
             this.originalSelectionMenuScale = this.selectionMenu.scale.clone();
+            const menuTrans = this.selectionMenu.getComponent(UITransform);
+            if (menuTrans) this.originalSelectionMenuSize = new Size(menuTrans.contentSize.width, menuTrans.contentSize.height);
             this.selectionMenu.children.forEach(child => {
                 this.menuItemScales.set(child.name, child.scale.clone());
             });
@@ -700,6 +845,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         if (GridController.activeBox && GridController.activeBox !== this) {
             GridController.activeBox.closeSelectionMenu();
         }
+        this.refreshSelectionMenuItems();
         if (this.selectionMenu.active) return;
         // this.showSelectedFrame();
         this.selectionMenu.active = true;
@@ -718,8 +864,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
     // --- FIX 2: COORDINATE CALCULATIONS ---
     // Since it's on the Canvas now, we set the World Position
     // We target slightly below the box clicked
-    const boxWorldPos = this.node.worldPosition;
-        this.selectionMenu.setWorldPosition(v3(this.node.worldPosition.x, this.node.worldPosition.y - 80, 0));
+        this.positionSelectionMenuNearGridCell();
         this.selectionMenu.setScale(v3(0, 0, 0));
         tween(this.selectionMenu).to(0.2, { scale: this.originalSelectionMenuScale }, { easing: 'backOut' }).call(() => {
             if (!GridController.hasShownFirstTapHand) {
@@ -728,6 +873,39 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
             }
             //   this.startMenuTimer();
         }).start();
+    }
+
+    private positionSelectionMenuNearGridCell() {
+        if (!this.selectionMenu) return;
+
+        const menuTrans = this.selectionMenu.getComponent(UITransform);
+        const canvas = director.getScene()?.getChildByPath("Canvas");
+        const canvasTrans = canvas?.getComponent(UITransform);
+        const width = menuTrans ? menuTrans.contentSize.width * Math.abs(this.originalSelectionMenuScale.x) : this.originalSelectionMenuSize.width;
+        const height = menuTrans ? menuTrans.contentSize.height * Math.abs(this.originalSelectionMenuScale.y) : this.originalSelectionMenuSize.height;
+        const anchorX = menuTrans ? menuTrans.anchorPoint.x : 0.5;
+        const anchorY = menuTrans ? menuTrans.anchorPoint.y : 0.5;
+        const margin = 18;
+        const isLastCellInRow = this.isLastGridCellInRow();
+        let targetX = this.node.worldPosition.x;
+        let targetY = this.node.worldPosition.y - (isLastCellInRow ? 150 : 80);
+
+        if (isLastCellInRow) {
+            targetX -= width * 0.18;
+        }
+
+        if (canvasTrans) {
+            const canvasWorld = canvas!.worldPosition;
+            const minX = canvasWorld.x - canvasTrans.contentSize.width / 2 + width * anchorX + margin;
+            const maxX = canvasWorld.x + canvasTrans.contentSize.width / 2 - width * (1 - anchorX) - margin;
+            const minY = canvasWorld.y - canvasTrans.contentSize.height / 2 + height * anchorY + margin;
+            const maxY = canvasWorld.y + canvasTrans.contentSize.height / 2 - height * (1 - anchorY) - margin;
+
+            targetX = Math.min(maxX, Math.max(minX, targetX));
+            targetY = Math.min(maxY, Math.max(minY, targetY));
+        }
+
+        this.selectionMenu.setWorldPosition(v3(targetX, targetY, 0));
     }
     private syncHintHighlight() {
     // 1. Safety: Do we have a hint and a voice clip?
@@ -785,7 +963,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         const hand = GridController.globalHandNode;
         if (!hand || !this.selectionMenu) return;
         const targetItem = this.selectionMenu.getChildByName(this.correctItemName);
-        if (targetItem) {
+        if (targetItem && targetItem.active) {
             GridController.isHandShowing = true;
             hand.active = true;
             hand.setSiblingIndex(999);
@@ -806,6 +984,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
         GridController.idleTimer = 0;
           if (this.selectionTimerBar) Tween.stopAllByTarget(this.selectionTimerBar);
         const clickedNode = event.target as Node;
+        if (!clickedNode.active || this.isMenuItemCompleted(clickedNode)) return;
         if (clickedNode.name === this.correctItemName) this.handleSuccessMove(clickedNode);
         else this.handleIncorrectMove();
     }
@@ -851,6 +1030,11 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
     flyNode.setWorldPosition(startPos);
     flyNode.setScale(sourceScale);
     
+    GridController.markItemCompleted(itemNode.name, this.getMenuItemCompletionKey(itemNode));
+    itemNode.active = false;
+    const button = itemNode.getComponent(Button);
+    if (button) button.interactable = false;
+
     this.closeSelectionMenu();
     this.executeFlyingMovement(flyNode, endPos, spriteFrame!, sourceSize, sourceScale, startPos);
 }
@@ -1239,6 +1423,7 @@ private executeVoiceCall() {
                     const savedScale = box.menuItemScales.get(item.name) || box.originalMenuItemScale;
                     item.setScale(savedScale);
                 });
+                box.refreshSelectionMenuItems();
             }
         });
         if (GridController.globalHandNode) {
