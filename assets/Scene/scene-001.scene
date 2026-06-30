@@ -2674,7 +2674,7 @@
       "__uuid__": "8e2d3d48-aa4b-46bb-81f3-c45be951c02a@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
@@ -3246,7 +3246,7 @@
     "handNode": null,
     "idleHandSprite": null,
     "clickHandSprite": null,
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
@@ -9322,7 +9322,7 @@
     "handNode": null,
     "idleHandSprite": null,
     "clickHandSprite": null,
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
@@ -10241,7 +10241,7 @@
     "handNode": null,
     "idleHandSprite": null,
     "clickHandSprite": null,
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
@@ -11154,7 +11154,7 @@
     "handNode": null,
     "idleHandSprite": null,
     "clickHandSprite": null,
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
@@ -12069,7 +12069,7 @@
     "handNode": null,
     "idleHandSprite": null,
     "clickHandSprite": null,
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
@@ -12982,7 +12982,7 @@
     "handNode": null,
     "idleHandSprite": null,
     "clickHandSprite": null,
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
@@ -13897,7 +13897,7 @@
     "handNode": null,
     "idleHandSprite": null,
     "clickHandSprite": null,
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
@@ -14810,7 +14810,7 @@
     "handNode": null,
     "idleHandSprite": null,
     "clickHandSprite": null,
-    "totalMatchesNeeded": 9,
+    "totalMatchesNeeded": 2,
     "successRotationEffect": {
       "__id__": 208
     },
