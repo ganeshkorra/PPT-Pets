@@ -271,6 +271,18 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
         });
     }
 
+    private getScaleFittedToGridCell(sourceSize: Size, sourceScale: Vec3): Vec3 {
+        const maxVisualWidth = this.targetSize.width * Math.abs(this.targetScale.x) * 0.88;
+        const maxVisualHeight = this.targetSize.height * Math.abs(this.targetScale.y) * 0.78;
+        const sourceVisualWidth = sourceSize.width * Math.abs(sourceScale.x);
+        const sourceVisualHeight = sourceSize.height * Math.abs(sourceScale.y);
+        const widthFit = sourceVisualWidth > 0 ? maxVisualWidth / sourceVisualWidth : 1;
+        const heightFit = sourceVisualHeight > 0 ? maxVisualHeight / sourceVisualHeight : 1;
+        const fit = Math.min(1, widthFit, heightFit);
+
+        return v3(sourceScale.x * fit, sourceScale.y * fit, sourceScale.z);
+    }
+
 
     private checkTapProgress() {
         if (!this.enableTapTriggerCTA || GridController.isGameOver) return;
@@ -1045,6 +1057,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
     const itemTrans = itemNode.getComponent(UITransform);
     const sourceSize = itemTrans!.contentSize.clone();
     const sourceScale = itemNode.scale.clone();
+    const placedScale = this.getScaleFittedToGridCell(sourceSize, sourceScale);
     const startPos = itemNode.worldPosition.clone();
     const endPos = this.node.worldPosition.clone();
     
@@ -1065,7 +1078,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
     if (button) button.interactable = false;
 
     this.closeSelectionMenu();
-    this.executeFlyingMovement(flyNode, endPos, spriteFrame!, sourceSize, sourceScale, startPos);
+    this.executeFlyingMovement(flyNode, endPos, spriteFrame!, sourceSize, placedScale, startPos);
 }
     private executeFlyingMovement(flyNode: Node, endPos: Vec3, spriteFrame: SpriteFrame, finalSize: Size, finalScale: Vec3, itemStartPos: Vec3) {
         tween(flyNode).parallel(
