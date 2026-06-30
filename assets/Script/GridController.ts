@@ -1220,6 +1220,7 @@ private revealNewClues() {
             const targetScale = this.getHintRevealScale(realClue);
             const flyer = instantiate(realClue);
             director.getScene()?.getChildByName("Canvas")?.addChild(flyer);
+            this.placeNodeBehindEndScreen(flyer);
             (flyer.getComponent(UIOpacity) || flyer.addComponent(UIOpacity)).opacity = 255;
 
             flyer.setWorldPosition(this.node.worldPosition);
@@ -1254,11 +1255,31 @@ private revealNewClues() {
     }); 
 }
 
+    private placeNodeBehindEndScreen(node: Node) {
+        const canvas = director.getScene()?.getChildByPath("Canvas");
+        if (!canvas) return;
+
+        if (node.parent !== canvas) {
+            canvas.addChild(node);
+        }
+
+        const ctaNode = (GridController.globalCtaEndScreen && GridController.globalCtaEndScreen.isValid)
+            ? GridController.globalCtaEndScreen
+            : director.getScene()?.getChildByPath("Canvas/CTA");
+
+        if (ctaNode && ctaNode.isValid && ctaNode.parent === canvas) {
+            const ctaIndex = canvas.children.indexOf(ctaNode);
+            node.setSiblingIndex(Math.max(0, ctaIndex - 1));
+        } else {
+            node.setSiblingIndex(canvas.children.length - 1);
+        }
+    }
+
     private showPlusOneBubble(count: number = 1) {
         const bubble = new Node("PlusOneBubble");
         director.getScene()?.getChildByName("Canvas")?.addChild(bubble);
         bubble.setWorldPosition(v3(this.node.worldPosition.x, this.node.worldPosition.y + 64, 0));
-        bubble.setSiblingIndex(999);
+        this.placeNodeBehindEndScreen(bubble);
         bubble.setScale(v3(0, 0, 0));
         const g = bubble.addComponent(Graphics);
         g.fillColor = GridController.SUCCESS_GREEN;
