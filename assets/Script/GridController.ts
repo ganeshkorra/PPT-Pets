@@ -1,4 +1,4 @@
-import { _decorator, Component, UIOpacity, instantiate, Size, Node, Vec3, AudioClip, AudioSource, Color, SpriteFrame, Tween, Graphics, tween, v3, Sprite, Event, director, Layout, UITransform, Label, CCInteger, Button, ProgressBar } from 'cc';
+import { _decorator, Component, UIOpacity, instantiate, Size, Node, Vec3, AudioClip, AudioSource, Color, SpriteFrame, Tween, Graphics, tween, v3, Sprite, Event, director, Layout, UITransform, Label, CCInteger, Button, ProgressBar, game } from 'cc';
 const { ccclass, property } = _decorator;
 import { Analytics, analyticsEvents } from "./Analytics";
 import { CTAButtonHandler } from './CTAButtonHandler';
@@ -76,6 +76,7 @@ export class GridController extends Component {
 
     private static globalTimerLabel: Label | null = null;
     private static remainingTime: number = 60;
+    private static lastDisplayedTime: number = -1;
     private static isTimerStarted: boolean = false;
     private static isGameOver: boolean = false;
 
@@ -90,8 +91,15 @@ export class GridController extends Component {
     private static globalHandIdle: SpriteFrame | null = null;
     private static globalHandClick: SpriteFrame | null = null;
     private static hintOriginalScales: Map<Node, Vec3> = new Map();
+    private static hintOriginalPositions: Map<Node, Vec3> = new Map();
     private static completedItemNames: Set<string> = new Set();
     private static completedMenuItemKeys: Set<string> = new Set();
+    private static pulsingNodes: Set<Node> = new Set();
+    private static ripplePool: Node[] = [];
+    private static readonly HIGHLIGHT_COLOR: Color = new Color(255, 245, 157, 255);
+    private static readonly RIPPLE_COLOR: Color = new Color(255, 214, 0, 255);
+    private static readonly SUCCESS_GREEN: Color = new Color(100, 221, 23, 255);
+    private static didConfigureFrameRate: boolean = false;
 
     @property(AudioClip) bgmClip: AudioClip = null!;
     @property(AudioClip) clickBoxClip: AudioClip = null!;
@@ -153,6 +161,7 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
     private menuDesignScale: Vec3 = v3(1, 1, 1);
     private targetScale: Vec3 = v3(1, 1, 1);
     private targetSize: { width: number, height: number } = { width: 0, height: 0 };
+    private cachedSelectionGroupKey: string = "";
 
     private getItemSpriteFrame(item: Node): SpriteFrame | null {
         return item.getComponent(Sprite)?.spriteFrame || null;
@@ -167,12 +176,15 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
 
     private getSelectionMenuGroupKey(): string {
         if (!this.selectionMenu) return "";
+        if (this.cachedSelectionGroupKey) return this.cachedSelectionGroupKey;
 
-        return this.selectionMenu.children
+        this.cachedSelectionGroupKey = this.selectionMenu.children
             .map(item => this.getSpriteKey(this.getItemSpriteFrame(item)))
             .filter(key => key.length > 0)
             .sort()
             .join("|");
+
+        return this.cachedSelectionGroupKey;
     }
 
     private getMenuItemCompletionKey(item: Node): string {
@@ -193,8 +205,10 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
         if (!this.selectionMenu) return;
 
         const visibleItems: Node[] = [];
+        let hasLayoutChange = false;
         this.selectionMenu.children.forEach(item => {
             const isCompleted = this.isMenuItemCompleted(item);
+            if (item.active === isCompleted) hasLayoutChange = true;
             const savedScale = this.menuItemScales.get(item.name) || item.scale.clone();
             Tween.stopAllByTarget(item);
             item.active = !isCompleted;
@@ -205,7 +219,9 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
             if (!isCompleted) visibleItems.push(item);
         });
 
-        this.fitSelectionMenuToItems(visibleItems);
+        if (hasLayoutChange || this.selectionMenu.active) {
+            this.fitSelectionMenuToItems(visibleItems);
+        }
     }
 
     private static markItemCompleted(itemName: string, itemKey: string) {
@@ -260,7 +276,6 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
         if (!this.enableTapTriggerCTA || GridController.isGameOver) return;
 
         GridController.globalUserTapCount++;
-        console.log(`[USER TAPS] ${GridController.globalUserTapCount} / ${this.maxTapsBeforeCTA}`);
 
         if (GridController.globalUserTapCount >= this.maxTapsBeforeCTA) {
             console.warn("[CTA TRIGGER] Tap limit reached. Sending user to End Screen.");
@@ -273,8 +288,15 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
     start() {
         // Fire LOADED → DISPLAYED sequence when game first loads (only once)
         if (GridController.allBoxes.length === 0) {
+            if (!GridController.didConfigureFrameRate) {
+                game.frameRate = 60;
+                GridController.didConfigureFrameRate = true;
+            }
+
             GridController.completedItemNames.clear();
             GridController.completedMenuItemKeys.clear();
+            GridController.pulsingNodes.clear();
+            GridController.lastDisplayedTime = -1;
             if (Analytics.instance) {
                 // 1. Fire LOADED first to signal assets are ready
                 Analytics.instance.dispatchEvent(analyticsEvents.LOADED);
@@ -371,7 +393,10 @@ highlightBar: ProgressBar = null!; // Link this to the 'Highlight Text' node in 
         GridController.remainingTime -= dt;
         if (GridController.globalTimerLabel) {
             const displayTime = Math.max(0, Math.ceil(GridController.remainingTime));
-            GridController.globalTimerLabel.string = `Time: ${displayTime}`;
+            if (displayTime !== GridController.lastDisplayedTime) {
+                GridController.globalTimerLabel.string = `Time: ${displayTime}`;
+                GridController.lastDisplayedTime = displayTime;
+            }
         }
         if (GridController.remainingTime <= 0) {
             this.handleGameOver("TIME OUT");
@@ -609,31 +634,66 @@ public showSelectedFrame() {
     this.manualStitchArc(graphics, innerW, -innerH, r, 270, 360, dashLength, gap);
 }
 
-private spawnClickRipple(worldPos: Vec3) {
+private acquireClickRipple(): Node {
+    const pooled = GridController.ripplePool.pop();
+    if (pooled?.isValid) return pooled;
+
     const rippleNode = new Node("ClickRipple");
+    rippleNode.active = false;
+
+    for (let i = 0; i < 5; i++) {
+        const ray = new Node("Ray");
+        rippleNode.addChild(ray);
+
+        const g = ray.addComponent(Graphics);
+        g.fillColor = GridController.RIPPLE_COLOR;
+        g.roundRect(-2.5, 0, 5, 16, 2.5);
+        g.fill();
+
+        ray.addComponent(UIOpacity).opacity = 0;
+    }
+
+    return rippleNode;
+}
+
+private releaseClickRipple(rippleNode: Node) {
+    if (!rippleNode?.isValid) return;
+
+    Tween.stopAllByTarget(rippleNode);
+    rippleNode.children.forEach(ray => {
+        Tween.stopAllByTarget(ray);
+        const opacity = ray.getComponent(UIOpacity);
+        if (opacity) {
+            Tween.stopAllByTarget(opacity);
+            opacity.opacity = 0;
+        }
+        ray.setPosition(0, 0, 0);
+        ray.setScale(v3(0, 0, 1));
+    });
+
+    rippleNode.active = false;
+    if (GridController.ripplePool.length < 4) {
+        GridController.ripplePool.push(rippleNode);
+    } else {
+        rippleNode.destroy();
+    }
+}
+
+private spawnClickRipple(worldPos: Vec3) {
     const canvas = director.getScene()?.getChildByPath("Canvas");
     if (!canvas) return;
 
+    const rippleNode = this.acquireClickRipple();
     canvas.addChild(rippleNode);
+    rippleNode.active = true;
     rippleNode.setWorldPosition(worldPos);
 
     // Spread the 5 rays evenly around the center (Vertical Up)
     const startAngle = -80; // Tilted left
     const angleStep = 30;   // 30 degrees distance between each ray
+    let completedRays = 0;
 
-    for (let i = 0; i < 5; i++) {
-        const ray = new Node("Ray");
-        rippleNode.addChild(ray);
-        
-        const g = ray.addComponent(Graphics);
-        const color = new Color().fromHEX('#FFD600'); // Bright Yellow
-        g.fillColor = color;
-        
-        // Draw the "Sausage" dash
-        // Increased thickness and length slightly to match image 2
-        g.roundRect(-2.5, 0, 5, 16, 2.5);
-        g.fill();
-
+    rippleNode.children.forEach((ray, i) => {
         // 1. Calculate the Angle: Result will be -60, -30, 0, 30, 60
         const angle = startAngle + (i * angleStep);
         const rad = angle * Math.PI / 180;
@@ -643,8 +703,9 @@ private spawnClickRipple(worldPos: Vec3) {
         ray.angle = -angle;
         
         // 3. Initial state
-        const op = ray.addComponent(UIOpacity);
+        const op = ray.getComponent(UIOpacity) || ray.addComponent(UIOpacity);
         op.opacity = 0;
+        ray.setPosition(0, 0, 0);
         ray.setScale(v3(0, 0, 1));
 
         // 4. Animation: Burst outwards directly in the direction of the angle
@@ -663,10 +724,13 @@ private spawnClickRipple(worldPos: Vec3) {
                 tween(op).to(0.1, { opacity: 255 }).delay(0.2).to(0.2, { opacity: 0 })
             )
             .call(() => {
-                if (i === 4) rippleNode.destroy();
+                completedRays++;
+                if (completedRays >= rippleNode.children.length) {
+                    this.releaseClickRipple(rippleNode);
+                }
             })
             .start();
-    }
+    });
 }
 
 private manualStitchLine(g: Graphics, x1: number, y1: number, x2: number, y2: number, len: number, gap: number) {
@@ -758,18 +822,24 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
 //     }
 // }
     private applyPulse(targetNode: Node, isOn: boolean) {
-        Tween.stopAllByTarget(targetNode);
         const isHint = targetNode === this.associatedHint || targetNode.parent?.name === "Hints";
         const baseScale = isHint ? this.originalHintScale : this.originalGridScale;
         const sprite = targetNode.getComponent(Sprite);
         if (isOn) {
+            if (GridController.pulsingNodes.has(targetNode)) return;
+            Tween.stopAllByTarget(targetNode);
+            if (sprite) Tween.stopAllByTarget(sprite);
+            GridController.pulsingNodes.add(targetNode);
             const targetScale = v3(baseScale.x * 1.02, baseScale.y * 1.02, 1);
-            const highlightColor = new Color().fromHEX('#FFF59D');
             tween(targetNode).parallel(
                 tween().to(1.0, { scale: targetScale }, { easing: 'sineInOut' }).to(1.0, { scale: baseScale }, { easing: 'sineInOut' }),
-                sprite ? tween(sprite).to(1.0, { color: highlightColor }, { easing: 'sineInOut' }).to(1.0, { color: Color.WHITE }, { easing: 'sineInOut' }) : tween()
+                sprite ? tween(sprite).to(1.0, { color: GridController.HIGHLIGHT_COLOR }, { easing: 'sineInOut' }).to(1.0, { color: Color.WHITE }, { easing: 'sineInOut' }) : tween()
             ).union().repeatForever().start();
         } else {
+            if (!GridController.pulsingNodes.has(targetNode)) return;
+            GridController.pulsingNodes.delete(targetNode);
+            Tween.stopAllByTarget(targetNode);
+            if (sprite) Tween.stopAllByTarget(sprite);
             targetNode.setScale(baseScale);
             if (sprite) sprite.color = Color.WHITE;
         }
@@ -927,10 +997,11 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
             hand.setSiblingIndex(999);
             hand.setWorldPosition(v3(targetItem.worldPosition.x + 10, targetItem.worldPosition.y - 50, 0));
             hand.setScale(v3(0, 0, 0));
+            Tween.stopAllByTarget(hand);
             tween(hand).to(0.2, { scale: GridController.initialHandScale }, { easing: 'backOut' }).call(() => this.playHandAnimation()).start();
             Tween.stopAllByTarget(targetItem);
             const savedScale = this.menuItemScales.get(targetItem.name) || v3(1, 1, 1);
-            tween(targetItem).to(0.5, { scale: v3(savedScale.x * 1, savedScale.y * 1, 1) }, { easing: 'sineInOut' }).to(0.5, { scale: savedScale }, { easing: 'sineInOut' }).union().repeatForever().start();
+            tween(targetItem).to(0.5, { scale: v3(savedScale.x * 1.08, savedScale.y * 1.08, 1) }, { easing: 'sineInOut' }).to(0.5, { scale: savedScale }, { easing: 'sineInOut' }).union().repeatForever().start();
         }
     }
 
@@ -1075,6 +1146,9 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
             if (!GridController.hintOriginalScales.has(hint)) {
                 GridController.hintOriginalScales.set(hint, hint.scale.clone());
             }
+            if (!GridController.hintOriginalPositions.has(hint)) {
+                GridController.hintOriginalPositions.set(hint, hint.position.clone());
+            }
         });
     }
 
@@ -1085,6 +1159,15 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
             GridController.hintOriginalScales.set(hint, scale);
         }
         return scale.clone();
+    }
+
+    private getHintOriginalPosition(hint: Node): Vec3 {
+        let position = GridController.hintOriginalPositions.get(hint);
+        if (!position) {
+            position = hint.position.clone();
+            GridController.hintOriginalPositions.set(hint, position);
+        }
+        return position.clone();
     }
 
     private getHintRevealScale(targetNode?: Node): Vec3 {
@@ -1178,7 +1261,7 @@ private revealNewClues() {
         bubble.setSiblingIndex(999);
         bubble.setScale(v3(0, 0, 0));
         const g = bubble.addComponent(Graphics);
-        g.fillColor = new Color().fromHEX('#64DD17');
+        g.fillColor = GridController.SUCCESS_GREEN;
         g.roundRect(-70, -25, 140, 50, 25);
         g.fill();
         const labelNode = new Node("Text");
@@ -1208,7 +1291,6 @@ private revealNewClues() {
 
     // --- LOGIC FOR NODE 9 (NO HINTS TO CLEAR) ---
     if (hintTargets.length === 0) { 
-        console.log(`[GRID] No hints to clear for box ${this.node.name}. Proceeding to reveal logic...`);
         onComplete(); 
         if (!this.hiddenCluesToUnlock || this.hiddenCluesToUnlock.length === 0) {
             this.playNextAvailableVoice();
@@ -1286,7 +1368,6 @@ private executeVoiceCall() {
     );
 
     if (nextBox && GridController.fxSource) {
-        console.log(`[AUDIO] Playing voice for: ${nextBox.node.name}`);
         GridController.fxSource.stop(); // Stop current before starting new
         GridController.fxSource.clip = nextBox.hintVoiceClip;
         GridController.fxSource.volume = 1.0;
@@ -1376,9 +1457,10 @@ private executeVoiceCall() {
         GridController.isHandShowing = false;
         GridController.allBoxes.forEach(box => {
             if (!box.isSolved) box.applyPulse(box.node, false);
-            if (box.selectionMenu) {
+            if (box.selectionMenu?.active) {
                 box.selectionMenu.children.forEach(item => {
                     const savedScale = box.menuItemScales.get(item.name) || box.originalMenuItemScale;
+                    Tween.stopAllByTarget(item);
                     item.setScale(savedScale);
                 });
                 box.refreshSelectionMenuItems();
@@ -1480,7 +1562,7 @@ private repositionHints(skipOpacityFade: Set<Node> = new Set(), onComplete?: Fun
     }
     
     const MAX_WIDTH = 780; 
-    const gapX = 25; // Slightly increased for breathing room
+    const gapX = 4; // Slightly increased for breathing room
     const gapY = 30;
     let rows: Node[][] = [[]]; 
     let rowWidths: number[] = [0];
@@ -1512,7 +1594,7 @@ private repositionHints(skipOpacityFade: Set<Node> = new Set(), onComplete?: Fun
     rows.forEach((rowNodes, rowIndex) => {
         const totalWidth = rowWidths[rowIndex];
         const rowStartX = -(totalWidth / 2);
-        let xOff = 0;
+        let xOff = -40;
         let rowMaxH = 0;
 
         rowNodes.forEach((h, index) => {
@@ -1528,12 +1610,12 @@ private repositionHints(skipOpacityFade: Set<Node> = new Set(), onComplete?: Fun
 
             // 2. Natural elastic bounce settle for smooth feel
             tween(h)
-                .delay(index * 0.06) // Slightly longer stagger for wave effect
-                .to(0.75, { 
+                .delay(index * 0.04)
+                .to(0.45, {
                     position: v3(tx, ty, 0),
                     scale: targetScale
                 }, { 
-                    easing: 'elasticOut' // Smooth elastic bounce
+                    easing: 'backOut'
                 })
                 .call(finishMove)
                 .start();
@@ -1542,8 +1624,8 @@ private repositionHints(skipOpacityFade: Set<Node> = new Set(), onComplete?: Fun
             const opacityComp = h.getComponent(UIOpacity) || h.addComponent(UIOpacity);
             if (opacityComp.opacity < 255 && !skipOpacityFade.has(h)) {
                 tween(opacityComp)
-                    .delay(index * 0.06)
-                    .to(0.5, { opacity: 255 }, { easing: 'quadOut' })
+                    .delay(index * 0.04)
+                    .to(0.35, { opacity: 255 }, { easing: 'quadOut' })
                     .start();
             }
 
@@ -1559,7 +1641,7 @@ private repositionHints(skipOpacityFade: Set<Node> = new Set(), onComplete?: Fun
         for (let i = 0; i < 8; i++) {
             const target = v3(Math.cos((i / 8) * Math.PI * 2) * 75, Math.sin((i / 8) * Math.PI * 2) * 75, 0);
             const s = new Node("Burst"); this.node.addChild(s);
-            const g = s.addComponent(Graphics); g.fillColor = new Color().fromHEX('#C6F34C');
+            const g = s.addComponent(Graphics); g.fillColor = GridController.SUCCESS_GREEN;
             const r = 14; g.moveTo(0, r); g.lineTo(r * 0.3, r * 0.3); g.lineTo(r, 0); g.lineTo(r * 0.3, -r * 0.3); g.lineTo(0, -r); g.lineTo(-r * 0.3, -r * 0.3); g.lineTo(-r, 0); g.lineTo(-r * 0.3, r * 0.3); g.close(); g.fill();
             tween(s).parallel(tween().by(0.6, { position: target }, { easing: 'sineOut' }), tween().to(0.6, { scale: v3(3, 3, 3) }), tween().by(0.6, { angle: 180 })).call(() => s.destroy()).start();
         }
@@ -1591,6 +1673,10 @@ private repositionHints(skipOpacityFade: Set<Node> = new Set(), onComplete?: Fun
     }
 
     onDestroy() {
+        GridController.pulsingNodes.delete(this.node);
+        if (this.associatedHint) GridController.pulsingNodes.delete(this.associatedHint);
+        GridController.hintOriginalScales.delete(this.node);
+        if (this.associatedHint) GridController.hintOriginalScales.delete(this.associatedHint);
         const idx = GridController.allBoxes.indexOf(this);
         if (idx > -1) GridController.allBoxes.splice(idx, 1);
         if (GridController.timerMaster === this) GridController.timerMaster = null;
