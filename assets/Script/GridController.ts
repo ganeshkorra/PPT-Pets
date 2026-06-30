@@ -790,7 +790,7 @@ private manualStitchArc(g: Graphics, cx: number, cy: number, r: number, startDeg
             if (this.bgmClip && GridController.bgmSource) {
                 GridController.bgmSource.clip = this.bgmClip;
                 GridController.bgmSource.loop = true;
-                GridController.bgmSource.volume = 0.5;
+                GridController.bgmSource.volume = 0.05;
                 GridController.bgmSource.play();
             }
         }
